@@ -6,12 +6,21 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, Matern
 from sklearn.preprocessing import StandardScaler
 import numpy as np
+from scipy.optimize import fmin_l_bfgs_b
+
 
 different_file_validation = 0    # Set this to 1 if using another CSV file for validation
 position_GP_model         = 0    # Set to 1 if using position as input (lat, lon), 0 otherwise
 training_data             = 0.90 # Proportion of data used for training
 input_column              = 4    # Column index (zero-based) for input variable
 output_column             = 10   # Column index (zero-based) for output variable
+
+
+def custom_optimizer(obj_func, initial_theta, bounds):
+    theta_opt, min_val, _ = fmin_l_bfgs_b(
+        obj_func, initial_theta, bounds=bounds, maxiter=300
+    )
+    return theta_opt, min_val
 
 def load_csv_with_dialog():
     root = tk.Tk()
@@ -37,17 +46,36 @@ def GP_Reg_Scaled(input, output, validation_input):
     output_scaled = output_scaler.fit_transform(output.reshape(-1, 1)).ravel()
     validation_scaled = input_scaler.transform(validation_input)
 
-    kernel = C(1.0, (1e-3, 1e3)) * RBF(length_scale=1.0, length_scale_bounds=(1e-2, 1e2))
-    gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=20, alpha=1e-6, normalize_y=True)
-    gp.fit(input_scaled, output_scaled)
+    print("📊 Input shape:", input_scaled.shape)
+    print("📈 Output shape:", output_scaled.shape)
+    print("🔍 Output mean/std:", np.mean(output_scaled), np.std(output_scaled))
 
+    kernel = C(1.0, (1e-3, 1e3)) * RBF(length_scale=1.0, length_scale_bounds=(1e-2, 1e2))
+    gp = GaussianProcessRegressor(
+        kernel=kernel,
+        n_restarts_optimizer=20,
+        alpha=1e-6,
+        normalize_y=True,
+        optimizer=custom_optimizer
+    )
+
+    print("🧠 Fitting Gaussian Process Regressor(RBF)...")
+    gp.fit(input_scaled, output_scaled)
+    print("✅ Fitting complete.")
+
+    print("🧪 Optimized kernel:", gp.kernel_)
+    print("🧮 Log Marginal Likelihood:", gp.log_marginal_likelihood(gp.kernel_.theta))
+
+    print("📊 Predicting on validation set(RBF)...")
     y_pred_scaled, y_std_scaled = gp.predict(validation_scaled, return_std=True)
+    print("✅ Prediction complete.")
+
     y_pred = output_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).ravel()
     y_std = y_std_scaled * output_scaler.scale_[0]
 
     return np.column_stack((y_pred, y_std))
 
-def GP_Reg_Matern_Scaled(input, output, validation_input, nu=1.5):
+def GP_Reg_Matern_Scaled(input, output, validation_input, nu=2.5):
     input_scaler = StandardScaler()
     output_scaler = StandardScaler()
 
@@ -56,10 +84,20 @@ def GP_Reg_Matern_Scaled(input, output, validation_input, nu=1.5):
     validation_scaled = input_scaler.transform(validation_input)
 
     kernel = C(1.0, (1e-3, 1e3)) * Matern(length_scale=1.0, length_scale_bounds=(1e-3, 1e2), nu=nu)
-    gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, alpha=1e-6, normalize_y=True)
-    gp.fit(input_scaled, output_scaled)
+    gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, alpha=1e-6, normalize_y=True, optimizer=custom_optimizer)
 
+
+    print("🧠 Fitting Gaussian Process Regressor(Maxtern)...")
+    gp.fit(input_scaled, output_scaled)
+    print("✅ Fitting complete.")
+
+    print("🧪 Optimized kernel:", gp.kernel_)
+    print("🧮 Log Marginal Likelihood:", gp.log_marginal_likelihood(gp.kernel_.theta))
+    
+    print("📊 Predicting on validation set(Matern)...")
     y_pred_scaled, y_std_scaled = gp.predict(validation_scaled, return_std=True)
+    print("✅ Prediction complete.")
+
     y_pred = output_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).ravel()
     y_std = y_std_scaled * output_scaler.scale_[0]
 
